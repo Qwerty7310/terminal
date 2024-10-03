@@ -41,6 +41,14 @@ int main() {
         string s = "";
 
         getline(cin, s);
+        for (size_t i = 0; i < s.size(); i++) {
+            if (s[i] == ' ') {
+                while (i + 1 < s.size() && s[i + 1] == ' ') {
+                    s.erase(i + 1, 1);
+                }
+            }
+        }
+		puts(s.c_str());
         int len_s = strlen(s.c_str());
         if (len_s == 0) continue;
 
@@ -74,8 +82,8 @@ int main() {
 }
 
 int changeDir(string s, int len_s, char *cur_dir, string home_dir) {
-    if (len_s > 2) {
-		printf("<%ld>\n", strlen("cd"));
+    if (len_s > 3) {
+        printf("<%ld>\n", strlen("cd"));
         string path = s.substr(strlen("cd") + 1, len_s);
         if (chdir(path.c_str()) == 0)
             strcpy(cur_dir, path.c_str());
@@ -83,6 +91,6 @@ int changeDir(string s, int len_s, char *cur_dir, string home_dir) {
             printf("cd: no such directory: %s\n", path.c_str());
     } else if (chdir(home_dir.c_str()) != 0)
         perror("chdir() error");
-	
-	return 0;
+
+    return 0;
 }
