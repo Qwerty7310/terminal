@@ -52,5 +52,3 @@ Mkfile.old
 dkms.conf
 
 .clang-format
-linux_archiver
-linux_unarchiver
