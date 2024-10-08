@@ -18,6 +18,8 @@
 #define OK 0
 #define ERROR 1
 
+#define ARGS_SIZE 10;
+
 using namespace std;
 
 int changeDir(string s, int len_s, char *cur_dir, string home_dir);
@@ -56,10 +58,35 @@ int main() {
         }
 
         int cnt_arg = 0;  // Счетчик аргументов функции
+        int args_size = ARGS_SIZE;
+        string *args = (string *)malloc(args_size * sizeof(string));
+
+        bool flag_single_quot = false;
+        size_t ind_single = 0;
+        bool flag_double_quot = false;
+        size_t ind_double = 0;
 
         for (size_t i = 0; i < s.size(); i++)
-            if (s[i] == ' ') {
-                if (s[i - 1] != '\\') cnt_arg += 1;  // Считаем аргументы функции
+            if (s[i] == '\'') {
+                if (!flag_single_quot) {
+                    ind_single = i;
+                } else {
+                    s.erase(i, 1);
+                    s.erase(ind_single, 1);
+                }
+                flag_single_quot = !flag_single_quot;
+            }
+            else if (s[i] == '"') {
+                if (!flag_double_quot) {
+                    ind_double = i;
+                } else {
+                    s.erase(i, 1);
+                    s.erase(ind_double, 1);
+                }
+                flag_double_quot = !flag_double_quot; 
+            }
+            else if (s[i] == ' ') {
+                if (s[i - 1] != '\\' && !flag_single_quot && !flag_double_quot) cnt_arg += 1;  // Считаем аргументы функции
                 while (i + 1 < s.size() && s[i + 1] == ' ') s.erase(i + 1, 1);  // Удаляем лишние пробелы
             }
 
@@ -79,7 +106,7 @@ int main() {
                 changeDir(s, len_s, cur_dir, home_dir);
         } else {
             printf("%s%s%s\n", PINK, command.c_str(), RESET);
-            // system(s.c_str());
+            system(s.c_str());
         }
     }
     printf("%sClose terminal...%s\n", RED, RESET);
@@ -96,6 +123,7 @@ int changeDir(string s, int len_s, char *cur_dir, string home_dir) {
             if (path[i] == '\\') path.erase(i, 1);
 
         // Переходим в новую директорию
+        printf("%s%s%s\n", YELLOW, path.c_str(), RESET);
         if (chdir(path.c_str()) == 0)
             strcpy(cur_dir, path.c_str());  // в случае успеха меняем текущую директорию
         else
