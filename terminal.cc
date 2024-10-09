@@ -23,7 +23,7 @@
 
 using namespace std;
 
-int splitStr(string &s, string &command, vector<string> &args);
+vector<string> splitStr(string &str_input);
 int changeDir(vector<string> args, string cur_dir, string home_dir);
 string getHostName();
 
@@ -52,22 +52,25 @@ int main() {
             break;
         }
 
-        string str_input;     // строка, введенная пользователем
-        string command;       // строка команды
-        vector<string> args;  // вектор аргументов
-        // разделяем строку на команду и ее аргументы
-        if (splitStr(str_input, command, args) == ERROR) continue;
+        // ввод строки
+        string str_input;
+        getline(cin, str_input);
+
+        vector<string> args =
+            splitStr(str_input);  // разделяем строку на отдельные аргументы и записываем в вектор
+
+        // если вектор пуст
+        if (args.empty()) continue;  // переходим на новую итерацию
 
         // обрабатываем команды
-        if (command == "close")
+        if (args[0] == "close")
             break;
-        else if (command == "cd") {
-            if (args.size() > 1)
+        else if (args[0] == "cd") {
+            if (args.size() > 2)
                 printf("cd: too many arguments\n");
             else
                 changeDir(args, cur_dir, home_dir);
         } else {
-            // printf("%s%s%s\n", PINK, command.c_str(), RESET);
             system(str_input.c_str());
 
             // pid_t pid = fork();
@@ -84,48 +87,42 @@ int main() {
     return 0;
 }
 
-int splitStr(string &s, string &command, vector<string> &args) {
-    // string s = "";
-    getline(cin, s);  // Считывам строку
+vector<string> splitStr(string &str_input) {
+    vector<string> args;  // вектор аргументов
 
     // Убираем пробелы в начале строки
     size_t i = 0;
-    while (s[i] == ' ') s.erase(i, 1);
+    while (str_input[i] == ' ') str_input.erase(i, 1);
 
     // Убираем пробелы в конце строки
-    i = s.size() - 1;
-    while (s[i] == ' ') {
-        s.erase(i, 1);
+    i = str_input.size() - 1;
+    while (str_input[i] == ' ') {
+        str_input.erase(i, 1);
         i -= 1;
     }
-    s = s + " ";  // добавляем пробел для корректой работы strtok при отстутствии аргументов
-    if (s == " ") return ERROR;
-
-    command = strtok((char *)s.c_str(), " ");  // получаем команду
-
-    s[command.size()] = ' ';  // меняем '\0' после strtok на пробел
-    string str_args = " " + s.substr(command.size() + 1, s.size()) + " ";  // получаем строку аргументов
+    str_input = " " + str_input + " ";  // добавляем пробел в начало и конец для корректой работы
+    if (str_input == "  ") return vector<string>();  // возвращаем пустой вектор
 
     // удаляем лишние пробелы
     i = 0;
-    while (i + 1 < str_args.size() && str_args[i + 1] == ' ') str_args.erase(i + 1, 1);
+    while (i + 1 < str_input.size() && str_input[i + 1] == ' ') str_input.erase(i + 1, 1);
 
     bool flag_double_quot = false;  // флаг открытия кавычек
     size_t ind_space = 0;           // индекс последнего пробела
 
     // разбиваем строку на отдельные аргументы
-    for (size_t i = 0; i < str_args.size(); i++) {
-        if (str_args[i] == '\\')
-            str_args.erase(i, 1);  // удаляем символ '\', i теперь указывает на экранируемый символ, на
-                                   // следующей итерации i++ перепрыгнет этот экранируемый символ
-        else if (str_args[i] == '"') {
+    for (size_t i = 0; i < str_input.size(); i++) {
+        if (str_input[i] == '\\')
+            str_input.erase(i, 1);  // удаляем символ '\', i теперь указывает на экранируемый символ, на
+                                    // следующей итерации i++ перепрыгнет этот экранируемый символ
+        else if (str_input[i] == '"') {
             flag_double_quot = !flag_double_quot;
-            str_args.erase(i, 1);
+            str_input.erase(i, 1);
             i -= 1;  // после удаления символы смещаются на 1 назад, необходимо вернуться на 1 символ
                      // назад, чтобы попасть на следующий символ
-        } else if ((str_args[i] == ' ') && (!flag_double_quot)) {
+        } else if ((str_input[i] == ' ') && (!flag_double_quot)) {
             if (i - ind_space > 1) {
-                args.push_back(str_args.substr(ind_space + 1, i - (ind_space + 1)));
+                args.push_back(str_input.substr(ind_space + 1, i - (ind_space + 1)));
             }
             ind_space = i;
         }
@@ -133,20 +130,20 @@ int splitStr(string &s, string &command, vector<string> &args) {
 
     //если не закрыты кавычки
     if (flag_double_quot) {
-        printf("%s\b: incorrect use of quotation marks\n", s.c_str());
-        return ERROR;
+        printf("%s\b: incorrect use of quotation marks\n", str_input.substr(1, str_input.length()).c_str());
+        return vector<string>();  // возвращаем пустой вектор
     }
 
-    return OK;
+    return args;
 }
 
 int changeDir(vector<string> args, string cur_dir, string home_dir) {
-    if (!args.empty()) {
+    if (args.size() > 1) {
         // Переходим в новую директорию
-        if (chdir(args[0].c_str()) == 0)
-            cur_dir = args[0];  // в случае успеха меняем текущую директорию
+        if (chdir(args[1].c_str()) == 0)
+            cur_dir = args[1];  // в случае успеха меняем текущую директорию
         else
-            printf("cd: no such directory: %s\n", args[0].c_str());  // сообщение об ошибке
+            printf("cd: no such directory: %s\n", args[1].c_str());  // сообщение об ошибке
     } else if (chdir(home_dir.c_str()) != 0)  // переходим в домашнюю директорию после команды "cd"
         perror("chdir() error");
 
