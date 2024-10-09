@@ -8,7 +8,7 @@ int main() {
 
     // Получаем текущую директорию
     if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-        std::cout << "Текущая директория: " << cwd << std::endl;
+        std::cout << "Текущая директория:   " << cwd << std::endl;
     } else
         perror("getcwd() ошибка");
 
