@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <limits.h>  // Для PATH_MAX
 #include <setjmp.h>
 #include <sys/wait.h>
@@ -28,6 +29,10 @@ using namespace std;
 sigjmp_buf env;
 volatile sig_atomic_t child_terminated = 0;
 
+bool g_should_jump = true;
+bool g_need_cleanup = false;
+int g_status;
+
 // Структура для хранения процесса
 struct ProcessInfo {
     int process_id;
@@ -35,16 +40,17 @@ struct ProcessInfo {
     string process_name;
 };
 
-bool g_should_jump = true;
-
 vector<char *> splitStr(string &str_input);
 int changeDir(vector<char *> args, string cur_dir, string home_dir);
 string getHostName();
 void sigchld_handler(int signo);
 string getProcessStatus(int status);
 void setNonBlockingMode();
+void cleanupTerminatedProcesses(vector<ProcessInfo> &processes);
+int my_exit(vector<ProcessInfo> &processes, vector<char *> &args);
+void my_ps(vector<ProcessInfo> processes);
 
-void mps(vector<ProcessInfo> processes);
+void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *> &args, string &str_input);
 
 int main() {
     struct sigaction sa;
@@ -70,6 +76,9 @@ int main() {
         string str_input;  // строка, вводимая пользователем
 
         if (sigsetjmp(env, 1) == 0) {
+            if (g_need_cleanup) {
+                cleanupTerminatedProcesses(processes);
+            }
             // Печатаем текущую директорию
             cur_dir = filesystem::current_path();
             if (!cur_dir.empty()) {
@@ -88,14 +97,6 @@ int main() {
             getline(cin, str_input);
         }
 
-        // g_should_jump = false;  // Отключаем jump для фонового процесса
-
-        // Проверка на завершение фоновых процессов
-        // if (child_terminated) {
-        //     child_terminated = 0;  // Сброс флага
-        //     continue;  // Возврат в начало для нового приглашения
-        // }
-
         vector<char *> args =
             splitStr(str_input);  // Разделяем строку на отдельные аргументы и записываем в вектор
 
@@ -111,49 +112,58 @@ int main() {
             else
                 changeDir(args, cur_dir, home_dir);
         } else if (strcmp(args[0], "mps") == 0) {
-            mps(processes);
-        } else {
-            // system(str_input.c_str());
+            my_ps(processes);
+        } else if (strcmp(args[0], "exit") == 0) {
+            if (args.size() < 2)
+                printf("Usage: exit <number>\n");
+            else if (args.size() > 2)
+                printf("exit: too many arguments\n");
+            else
+                my_exit(processes, args);
+        } else
+            newProcess(processes, cnt_process, args, str_input);
 
-            bool is_background = false;
-            if (strcmp(args.back(), "&") == 0) {
-                args.pop_back();
-                is_background = true;
-            }
-
-            pid_t pid = fork();
-
-            if (pid == 0) {
-                args.push_back(NULL);
-                if (execvp(args[0], args.data()) == -1) {
-                    perror("execpv");
-                    exit(EXIT_FAILURE);  // Завершение дочернего процесса в случае ошибки execvp
-                }
-            } else if (pid < 0) {
-                perror("fork");
-            } else {
-                if (is_background) {
-                    cnt_process += 1;
-                    ProcessInfo process = {cnt_process, pid, str_input};
-                    processes.push_back(process);
-                    printf("%s[%d] %d%s\n", PINK, cnt_process, pid, RESET);
-                } else {
-                    g_should_jump = false;  // Отключаем jump для фонового процесса
-                    printf("%s%d%s\n", PINK, pid, RESET);
-                    int status;
-                    pid_t wpid = waitpid(pid, &status, WUNTRACED);
-                    if (wpid == -1) perror("waitpid");
-
-                    printf("%s%d %s%s\n", PINK, pid, getProcessStatus(status).c_str(), RESET);
-                    g_should_jump = true;
-                }
-            }
-        }
-        // g_should_jump = true;
+        g_should_jump = true;
     }
     printf("%sClose terminal...%s\n", RED, RESET);
 
     return 0;
+}
+
+void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *> &args, string &str_input) {
+    bool is_background = false;
+    if (strcmp(args.back(), "&") == 0) {
+        args.pop_back();
+        is_background = true;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        args.push_back(NULL);
+        if (execvp(args[0], args.data()) == -1) {
+            perror("execpv");
+            exit(EXIT_FAILURE);  // Завершение дочернего процесса в случае ошибки execvp
+        }
+    } else if (pid < 0) {
+        perror("fork");
+    } else {
+        if (is_background) {
+            cnt_process += 1;
+            ProcessInfo process = {cnt_process, pid, str_input};
+            processes.push_back(process);
+            printf("%s[%d] %d%s\n", PINK, cnt_process, pid, RESET);
+        } else {
+            g_should_jump = false;  // Отключаем jump
+            printf("%s%d%s\n", PINK, pid, RESET);
+            int status;
+            pid_t wpid = waitpid(pid, &status, WUNTRACED);
+            if (wpid == -1) perror("waitpid");
+
+            printf("%s%d %s%s\n", PINK, pid, getProcessStatus(status).c_str(), RESET);
+            g_should_jump = true;
+        }
+    }
 }
 
 vector<char *> splitStr(string &str_input) {
@@ -221,6 +231,7 @@ int changeDir(vector<char *> args, string cur_dir, string home_dir) {
     return 0;
 }
 
+// Получение хоста
 string getHostName() {
     char host_name[PATH_MAX];
     if (gethostname(host_name, sizeof(host_name)) == 0)
@@ -229,19 +240,21 @@ string getHostName() {
         return "";
 }
 
+// Обработчик сигнала
 void sigchld_handler(int signo) {
     (void)signo;
 
     int status;
     pid_t wpid;
 
+    // Проходимся по всем дочерним процессам
     while ((wpid = waitpid(-1, &status, WNOHANG)) > 0) {
         if (wpid == -1) perror("waitpid");
-        printf("\n%s[1] %d %s%s\n", PINK, wpid, getProcessStatus(status).c_str(), RESET);
+        g_need_cleanup = true;  // Ставим флаг, что необходимо удалить информацию о завершенных процессах
+        printf("\n%s%s%s", PINK, getProcessStatus(status).c_str(), RESET);
     }
 
     // Перенаправляем выполнение обратно в основное тело программы
-    printf("g: %d\n", g_should_jump);
     if (g_should_jump) siglongjmp(env, 1);
 }
 
@@ -263,9 +276,53 @@ string getProcessStatus(int status) {
         return "running";  // Процесс продолжает выполнение
 }
 
-void mps(vector<ProcessInfo> processes) {
-    printf("№\tPID\tNAME\n");
-    for (auto process : processes) {
-        printf("%d\t%d\t%s\n", process.process_id, process.pid, process.process_name.c_str());
+// Функция вывода информации о фоновых профессах
+void my_ps(vector<ProcessInfo> processes) {
+    printf("%-5s\t%-10s\t%s\n", "N", "PID", "NAME");
+    for (auto process : processes)
+        printf("%-5d\t%-10d\t\b%s\n", process.process_id, process.pid, process.process_name.c_str());
+}
+
+// Функция удаления структур завершенных процессов
+void cleanupTerminatedProcesses(vector<ProcessInfo> &processes) {
+    for (size_t i = 0; i < processes.size();) {
+        if (kill(processes[i].pid, 0) == -1 &&
+            errno == ESRCH) {  // Если kill вернул -1 и код ошибки равен флагу отсутствия процесса
+            printf("\n%s[%d] %d%s\n", PINK, processes[i].process_id, processes[i].pid,
+                   RESET);  // Выводим информацию о завершении процесса
+            processes.erase(processes.begin() + i);  // Удаляем структуру из векора
+        } else
+            i++;
     }
+    g_need_cleanup = false;  // Опускаем флаг
+}
+
+// Функция принудительного завершения процесса
+int my_exit(vector<ProcessInfo> &processes, vector<char *> &args) {
+    int number;                               // Номер процесса
+    if (args[1] == to_string(atoi(args[1])))  // Проверка на корректность ввода
+        number = atoi(args[1]);               // Получаем номер процесса
+    else {
+        printf("exit: invalid argument\n");
+        return -1;
+    }
+
+    bool flag = false;  // Флаг нахождения такого процесса
+    int status;
+
+    // Проходим по структурам всех процессов
+    for (size_t i = 0; i < processes.size(); i++) {
+        if (processes[i].process_id == number) {  // Сравниваем номер
+            flag = true;
+            kill(processes[i].pid, SIGTERM);        // Убиваем процесс
+            waitpid(processes[i].pid, &status, 0);  // Ожидаем завершения процесса
+            printf("%s%s%s\n", PINK, getProcessStatus(status).c_str(), RESET);
+            printf("%s[%d] %d%s\n", PINK, processes[i].process_id, processes[i].pid, RESET);
+            processes.erase(processes.begin() + i);  // Удаляем структуру процесса из вектора
+            break;
+        }
+    }
+    if (!flag) printf("exit: a process with this number does not exist\n");
+
+    return 0;
 }

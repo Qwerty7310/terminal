@@ -4,13 +4,11 @@
 #include <iostream>
 
 int main() {
-    char cwd[PATH_MAX];  // Буфер для хранения пути
+    std::string s = "1234";
+    int i_s = atoi(s.c_str());
+    std::string n_s = std::to_string(i_s);
 
-    // Получаем текущую директорию
-    if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-        std::cout << "Текущая директория:   " << cwd << std::endl;
-    } else
-        perror("getcwd() ошибка");
+    std::cout << "[" << i_s << "][" << n_s << "][" << (s == n_s) << "]\n";
 
     return 0;
 }
