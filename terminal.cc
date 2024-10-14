@@ -132,36 +132,38 @@ int main() {
 
 void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *> &args, string &str_input) {
     bool is_background = false;
-    if (strcmp(args.back(), "&") == 0) {
+    if (strcmp(args.back(), "&") == 0) {  // Проверяем, открыт ли процесс в фоне
         args.pop_back();
         is_background = true;
     }
 
-    pid_t pid = fork();
+    pid_t pid = fork();  // Создаем новый процесс
 
-    if (pid == 0) {
+    if (pid == 0) {  // Дочерний процесс
         args.push_back(NULL);
-        if (execvp(args[0], args.data()) == -1) {
+        if (execvp(args[0], args.data()) == -1) {  // Заменяем на нужный процесс
             perror("execpv");
             exit(EXIT_FAILURE);  // Завершение дочернего процесса в случае ошибки execvp
         }
-    } else if (pid < 0) {
+    } else if (pid < 0) {  // Ошибка в fork
         perror("fork");
     } else {
-        if (is_background) {
+        if (is_background) {  // Если процесс запущен в фоне, то не блокируем консоль
             cnt_process += 1;
-            ProcessInfo process = {cnt_process, pid, str_input};
-            processes.push_back(process);
-            printf("%s[%d] %d%s\n", PINK, cnt_process, pid, RESET);
+            ProcessInfo process = {
+                cnt_process, pid,
+                str_input.substr(1, str_input.size() - 2)};  // Создаем структуру с описанием процесса
+            processes.push_back(process);  // Добавляем структуру в вектор
+            printf("%s[%d] %d%s\n", PINK, cnt_process, pid, RESET);  // Выводим информацию о процессе
         } else {
-            g_should_jump = false;  // Отключаем jump
-            printf("%s%d%s\n", PINK, pid, RESET);
-            int status;
-            pid_t wpid = waitpid(pid, &status, WUNTRACED);
+            g_should_jump = false;                 // Отключаем jump
+            printf("%s%d%s\n", PINK, pid, RESET);  // Выводим информацию о процессе
+            int status;                            // Статус процесса
+            pid_t wpid = waitpid(pid, &status, WUNTRACED);  // Ожидаем завершения процесса
             if (wpid == -1) perror("waitpid");
 
             printf("%s%d %s%s\n", PINK, pid, getProcessStatus(status).c_str(), RESET);
-            g_should_jump = true;
+            g_should_jump = true;  // Возвращаем jump
         }
     }
 }
@@ -204,6 +206,7 @@ vector<char *> splitStr(string &str_input) {
                 char *c_str = new char[i - (ind_space + 1) + 1];
                 strcpy(c_str, str_input.substr(ind_space + 1, i - (ind_space + 1)).c_str());
                 args.push_back(c_str);
+                delete[] c_str;
             }
             ind_space = i;
         }
@@ -278,9 +281,9 @@ string getProcessStatus(int status) {
 
 // Функция вывода информации о фоновых профессах
 void my_ps(vector<ProcessInfo> processes) {
-    printf("%-5s\t%-10s\t%s\n", "N", "PID", "NAME");
+    printf("%-5s\t%-10s\t%s\n", "№", "PID", "NAME");
     for (auto process : processes)
-        printf("%-5d\t%-10d\t\b%s\n", process.process_id, process.pid, process.process_name.c_str());
+        printf("%-5d\t%-10d\t%s\n", process.process_id, process.pid, process.process_name.c_str());
 }
 
 // Функция удаления структур завершенных процессов
