@@ -26,33 +26,35 @@
 
 using namespace std;
 
-sigjmp_buf env;
-volatile sig_atomic_t child_terminated = 0;
-
-bool g_should_jump = true;
-bool g_need_cleanup = false;
-int g_status;
-
-// Структура для хранения процесса
+// Структура для хранения информации о процессе
 struct ProcessInfo {
-    int process_id;
+    int process_number;
     pid_t pid;
     string process_name;
 };
 
-vector<char *> splitStr(string &str_input);
-int changeDir(vector<char *> args, string cur_dir, string home_dir);
-string getHostName();
-void sigchld_handler(int signo);
-string getProcessStatus(int status);
-void setNonBlockingMode();
-void cleanupTerminatedProcesses(vector<ProcessInfo> &processes);
-int my_exit(vector<ProcessInfo> &processes, vector<char *> &args);
-void my_ps(vector<ProcessInfo> processes);
+vector<char *> splitStr(string &str_input);  // Разбиение строки на аргументы
+int changeDir(vector<char *> args, string home_dir);  // Смена текущей директории
+string getHostName();                                 // Получение имени хоста
+void sigchld_handler(int signo);                      // Обработчик сигнала
+string getProcessStatus(int status);                  // Получение статуса процесса
+int my_exit(vector<ProcessInfo> &processes, vector<char *> &args);  // exit
+void my_ps(vector<ProcessInfo> processes);  // ps для фоновых процессов
+void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *> &args,
+                string &str_input);  // создание нового процесса
+int printPath();                     // Печать текущего пути
+void deleteTerminatedProcess(int process_number, int status);  // Удаление информации о завершенном процессе
 
-void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *> &args, string &str_input);
+sigjmp_buf env;             // Буфер для хранения состояния программы
+bool g_should_jump = true;  // Необходимо ли вернуться на ввод строки
+
+string home_dir = getenv("HOME");  // Получаем путь к домашней директории
+string cur_user = getenv("USER");  // Получаем имя пользователя
+string host_name = getHostName();  // Получаем имя системы
+vector<ProcessInfo> processes;     // Вектор процессов
 
 int main() {
+    // Инициализируем обработчик сигнала завершения процесса
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;  // Указание функции обработчика
     sigemptyset(&sa.sa_mask);         // Инициализация маски сигналов
@@ -60,41 +62,20 @@ int main() {
     sigaction(SIGCHLD, &sa, nullptr);  // Регистрация обработчика
 
     printf("%sStart terminal...%s\n", ORANGE, RESET);
-    string home_dir = getenv("HOME");  // Получаем путь к домашней директории
-    string cur_user = getenv("USER");  // Получаем имя пользователя
-    string host_name = getHostName();  // Получаем имя системы
 
     // Переходим в домашнюю директорию
     if ((home_dir.c_str() == nullptr) || (chdir(home_dir.c_str()) != 0)) perror("chdir() error");
 
-    string cur_dir;  // Буфер для хранения пути
-
-    vector<ProcessInfo> processes;
     int cnt_process = 0;
 
     while (true) {
         string str_input;  // строка, вводимая пользователем
 
+        // Если получаем сигнал о завершении процесса,
         if (sigsetjmp(env, 1) == 0) {
-            if (g_need_cleanup) {
-                cleanupTerminatedProcesses(processes);
-            }
             // Печатаем текущую директорию
-            cur_dir = filesystem::current_path();
-            if (!cur_dir.empty()) {
-                printf("%s%s@%s%s:", GREEN, cur_user.c_str(), host_name.c_str(), RESET);
-                if (cur_dir.find(home_dir) == 0)
-                    printf("%s~%s%s$ ", CYAN, cur_dir.substr(home_dir.size(), cur_dir.size()).c_str(), RESET);
-                else
-                    printf("%s%s%s$ ", CYAN, cur_dir.c_str(), RESET);
-            } else {
-                perror("getcwd() error");
-                break;
-            }
-
-            // ввод строки
-            // string str_input;
-            getline(cin, str_input);
+            if (printPath() == -1) break;
+            getline(cin, str_input);  // ввод строки
         }
 
         vector<char *> args =
@@ -110,7 +91,7 @@ int main() {
             if (args.size() > 2)
                 printf("cd: too many arguments\n");
             else
-                changeDir(args, cur_dir, home_dir);
+                changeDir(args, home_dir);
         } else if (strcmp(args[0], "mps") == 0) {
             my_ps(processes);
         } else if (strcmp(args[0], "exit") == 0) {
@@ -130,8 +111,9 @@ int main() {
     return 0;
 }
 
+// Создание нового процесса
 void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *> &args, string &str_input) {
-    bool is_background = false;
+    bool is_background = false;           // В фоне процесс или нет
     if (strcmp(args.back(), "&") == 0) {  // Проверяем, открыт ли процесс в фоне
         args.pop_back();
         is_background = true;
@@ -142,17 +124,16 @@ void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *>
     if (pid == 0) {  // Дочерний процесс
         args.push_back(NULL);
         if (execvp(args[0], args.data()) == -1) {  // Заменяем на нужный процесс
-            perror("execpv");
+            perror("\nexecpv");
             exit(EXIT_FAILURE);  // Завершение дочернего процесса в случае ошибки execvp
         }
     } else if (pid < 0) {  // Ошибка в fork
         perror("fork");
-    } else {
+    } else {  // Родительский процесс
         if (is_background) {  // Если процесс запущен в фоне, то не блокируем консоль
             cnt_process += 1;
-            ProcessInfo process = {
-                cnt_process, pid,
-                str_input.substr(1, str_input.size() - 2)};  // Создаем структуру с описанием процесса
+            // Создаем структуру с описанием процесса
+            ProcessInfo process = {cnt_process, pid, str_input.substr(1, str_input.size() - 2)};
             processes.push_back(process);  // Добавляем структуру в вектор
             printf("%s[%d] %d%s\n", PINK, cnt_process, pid, RESET);  // Выводим информацию о процессе
         } else {
@@ -168,6 +149,7 @@ void newProcess(vector<ProcessInfo> &processes, int &cnt_process, vector<char *>
     }
 }
 
+// Разбиение строки на аргументы
 vector<char *> splitStr(string &str_input) {
     vector<char *> args;  // Вектор аргументов
 
@@ -219,13 +201,11 @@ vector<char *> splitStr(string &str_input) {
     return args;
 }
 
-int changeDir(vector<char *> args, string cur_dir, string home_dir) {
+// Смена текущей директории
+int changeDir(vector<char *> args, string home_dir) {
     if (args.size() > 1) {
         // Переходим в новую директорию
-        if (chdir(args[1]) == 0)
-            cur_dir = args[1];  // В случае успеха меняем текущую директорию
-        else
-            printf("cd: no such directory: %s\n", args[1]);  // Сообщение об ошибке
+        if (chdir(args[1])) printf("cd: no such directory: %s\n", args[1]);  // Сообщение об ошибке
     } else if (chdir(home_dir.c_str()) != 0)  // Переходим в домашнюю директорию после команды "cd"
         perror("chdir() error");
 
@@ -251,8 +231,7 @@ void sigchld_handler(int signo) {
     // Проходимся по всем дочерним процессам
     while ((wpid = waitpid(-1, &status, WNOHANG)) > 0) {
         if (wpid == -1) perror("waitpid");
-        g_need_cleanup = true;  // Ставим флаг, что необходимо удалить информацию о завершенных процессах
-        printf("\n%s%s%s", PINK, getProcessStatus(status).c_str(), RESET);
+        deleteTerminatedProcess(wpid, status);
     }
 
     // Перенаправляем выполнение обратно в основное тело программы
@@ -281,21 +260,20 @@ string getProcessStatus(int status) {
 void my_ps(vector<ProcessInfo> processes) {
     printf("%-5s\t%-10s\t%s\n", "№", "PID", "NAME");
     for (auto process : processes)
-        printf("%-5d\t%-10d\t%s\n", process.process_id, process.pid, process.process_name.c_str());
+        printf("%-5d\t%-10d\t%s\n", process.process_number, process.pid, process.process_name.c_str());
 }
 
-// Функция удаления структур завершенных процессов
-void cleanupTerminatedProcesses(vector<ProcessInfo> &processes) {
-    for (size_t i = 0; i < processes.size();) {
-        if (kill(processes[i].pid, 0) == -1 &&
-            errno == ESRCH) {  // Если kill вернул -1 и код ошибки равен флагу отсутствия процесса
-            printf("\n%s[%d] %d%s\n", PINK, processes[i].process_id, processes[i].pid,
+// Функция удаления завершенного процесса
+void deleteTerminatedProcess(int pid, int status) {
+    for (size_t i = 0; i < processes.size(); i++) {
+        if (processes[i].pid == pid) {
+            printf("\n%s[%d] %d %s%s\n", PINK, processes[i].process_number, processes[i].pid,
+                   getProcessStatus(status).c_str(),
                    RESET);  // Выводим информацию о завершении процесса
             processes.erase(processes.begin() + i);  // Удаляем структуру из векора
-        } else
-            i++;
+            break;
+        }
     }
-    g_need_cleanup = false;  // Опускаем флаг
 }
 
 // Функция принудительного завершения процесса
@@ -313,17 +291,34 @@ int my_exit(vector<ProcessInfo> &processes, vector<char *> &args) {
 
     // Проходим по структурам всех процессов
     for (size_t i = 0; i < processes.size(); i++) {
-        if (processes[i].process_id == number) {  // Сравниваем номер
+        if (processes[i].process_number == number) {  // Сравниваем номер
             flag = true;
             kill(processes[i].pid, SIGTERM);        // Убиваем процесс
             waitpid(processes[i].pid, &status, 0);  // Ожидаем завершения процесса
-            printf("%s%s%s\n", PINK, getProcessStatus(status).c_str(), RESET);
-            printf("%s[%d] %d%s\n", PINK, processes[i].process_id, processes[i].pid, RESET);
+            printf("%s[%d] %d %s%s\n", PINK, processes[i].process_number, processes[i].pid,
+                   getProcessStatus(status).c_str(), RESET);
             processes.erase(processes.begin() + i);  // Удаляем структуру процесса из вектора
             break;
         }
     }
     if (!flag) printf("exit: a process with this number does not exist\n");
+
+    return 0;
+}
+
+// Печать текущего пути
+int printPath() {
+    string cur_dir = filesystem::current_path();
+    if (!cur_dir.empty()) {
+        printf("%s%s@%s%s:", GREEN, cur_user.c_str(), host_name.c_str(), RESET);
+        if (cur_dir.find(home_dir) == 0)
+            printf("%s~%s%s$ ", CYAN, cur_dir.substr(home_dir.size(), cur_dir.size()).c_str(), RESET);
+        else
+            printf("%s%s%s$ ", CYAN, cur_dir.c_str(), RESET);
+    } else {
+        perror("current_path");
+        return -1;
+    }
 
     return 0;
 }
