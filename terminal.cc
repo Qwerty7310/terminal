@@ -203,10 +203,8 @@ vector<char *> splitStr(string &str_input) {
                      // назад, чтобы попасть на следующий символ
         } else if ((str_input[i] == ' ') && (!flag_double_quot)) {
             if (i - ind_space > 1) {
-                char *c_str = new char[i - (ind_space + 1) + 1];
-                strcpy(c_str, str_input.substr(ind_space + 1, i - (ind_space + 1)).c_str());
-                args.push_back(c_str);
-                delete[] c_str;
+                args.push_back(new char[i - (ind_space + 1) + 1]);
+                strcpy(args.back(), str_input.substr(ind_space + 1, i - (ind_space + 1)).c_str());
             }
             ind_space = i;
         }
