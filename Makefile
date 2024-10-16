@@ -3,7 +3,7 @@ CFLAGS = -Wall -Werror -Wextra
 CPATH = 
 TARGET = terminal
 
-all: clang clean $(TARGET)
+all: clang clean $(TARGET) install
 
 $(TARGET): terminal.cc
 	$(CC) $(CFLAGS) $^ -o $@
@@ -13,3 +13,7 @@ clean:
 
 clang:
 	clang-format -i --verbose *.cc
+
+install:
+	sudo rm -rf /bin/terminal
+	sudo cp terminal /bin
